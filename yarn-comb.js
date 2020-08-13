@@ -10,14 +10,7 @@ const rl = readline.createInterface({
   crlfDelay: Infinity,
 });
 
-const requireLines = [];
-
-rl.on('line', line => {
-  // only keep lines that are requirement definitions (not comment, not indented)
-  if (line !== '' && !line.startsWith(' ') && !line.startsWith('#')) {
-    requireLines.push(line.replace(/:$/, ''));
-  }
-});
+const packages = [];
 
 const getPackageName = line => {
   line = line.replace(/^"/, '');
@@ -26,51 +19,107 @@ const getPackageName = line => {
   } else {
     line = line.split('@')[0];
   }
-  // line = line.substring(0, 20);
   return line;
 };
 
-// object-filter for only ones with multiple lines in the value
-const multipleVersionPackages = groups => {
-  const packageNames = Object.keys(groups);
-  const multipleVersionPackageNames = packageNames.filter(k => groups[k].length > 1);
+// filter the pkg name out of the dependency definition as it is redundant
+const removePackageNameFromDependency = (dependency, packageName) =>
+  dependency.replace(new RegExp(`("|${packageName}@)`, 'g'), '');
 
-  const groupMultiples = {};
-  multipleVersionPackageNames.forEach(k => {
-    // filter the pkg name out of the lines as it is redundant
-    groupMultiples[k] = groups[k].map(line => line.replace(new RegExp(`${k}@`, 'g'), ''));
-  });
-  return groupMultiples;
+const parseDependency = line => {
+  const cleanLine = line.replace(/:$/, '');
+  const package = getPackageName(cleanLine);
+  const dependency = removePackageNameFromDependency(cleanLine, package);
+  const strictness = getStrictness(dependency);
+  return { package, dependency, strictness };
 };
 
-const detailCountWhere = (details, prop, val) =>
-  _countBy(Object.values(details), deet => deet[prop])[val];
+const parseVersion = line => {
+  const version = line.replace(/(  version "|")/g, '');
+  const splitVersion = version.replace(/^0\./, '0dot').split('.');
+  const isZeroDot = splitVersion[0].includes('dot');
+  if (isZeroDot) splitVersion[0] = splitVersion[0].replace(/dot/, '.');
+  return { version, major: splitVersion[0], minor: `${splitVersion[0]}.${splitVersion[1]}` };
+};
+
+rl.on('line', line => {
+  // Add a record for lines that are requirement definitions (not comment, not indented)
+  if (line !== '' && !line.startsWith(' ') && !line.startsWith('#')) {
+    packages.push(parseDependency(line));
+  }
+  // attach the next line ("  version ...") to the previous dependency line
+  if (line.startsWith('  version ')) {
+    const package = packages[packages.length - 1];
+
+    const { version, major, minor } = parseVersion(line);
+    package.version = version;
+    package.major = major;
+    package.minor = minor;
+  }
+});
+
+const unknownStrictnesses = /[|<*\-x]/;
+
+const getStrictness = dependency => {
+  if (dependency.match(/^\d+\.\d+\.\d+/)) return 'Exact';
+  if (dependency.match(/^\d+\.\d+/)) return 'Approximate';
+  if (dependency.match(unknownStrictnesses)) return 'unknown';
+  if (dependency.includes('^')) return 'Compatible';
+  else if (dependency.includes('~')) return 'Approximate';
+  return 'Exact?';
+};
 
 rl.on('close', () => {
-  // take all the lines, group them by package name
-  const groups = _groupBy(requireLines, getPackageName);
-
-  const groupMultiples = multipleVersionPackages(groups);
-
-  const details = {};
-  Object.keys(groupMultiples).forEach(k => {
-    details[k] = { lines: groupMultiples[k] };
-    const majors = _groupBy(groupMultiples[k], line => {
-      // this is still not exactly right as it will group 0.x with x.0
-      return line.replace(/^[~^]/, '').replace(/^0\./, '0dot').split('.')[0];
+  let groupPackages = _groupBy(packages, 'package');
+  groupPackages = Object.values(groupPackages).map(gp => {
+    const package = gp[0].package;
+    const versions = gp.map(({ dependency, version, major, minor, strictness }) => {
+      return {
+        dependency: dependency,
+        strictness: strictness,
+        version,
+        major,
+        minor,
+      };
     });
-    if (Object.values(majors).some(val => val.length > 1)) {
-      details[k].majorOverlaps = true;
-    }
+
+    let multiple;
+    let dupMajor = [];
+    let dupMinor = [];
+    if (versions.length > 1) {
+      multiple = true;
+      const dupMajorCounts = _countBy(versions.map(v => v.major));
+      Object.keys(dupMajorCounts).forEach(k => {
+        if (dupMajorCounts[k] > 1) dupMajor.push(k);
+      });
+      const dupMinorCounts = _countBy(versions.map(v => v.minor));
+      Object.keys(dupMinorCounts).forEach(k => {
+        if (dupMinorCounts[k] > 1) dupMinor.push(k);
+      });
+      // console.log(package, dupMajor);
+    } else multiple = false;
+
+    const recommendations = dupMajor.map(dm => {
+      return `dedupe version ${dm} yo`;
+    });
+
+    return {
+      package,
+      versions,
+      multiple,
+      dupMajor: dupMajor.length != 0,
+      dupMinor: dupMinor.length != 0,
+      recommendations,
+    };
   });
 
-  // console.log(details);
+  console.dir(
+    groupPackages.filter(gp => gp.dupMajor),
+    { depth: null },
+  );
 
   console.log('yarn.lock report --------------------------');
-  console.log('Total packages (including copies):', requireLines.length);
-  console.log('  packages with multiple versions:', Object.keys(groupMultiples).length);
-  console.log(
-    '         duplicate major versions:',
-    detailCountWhere(details, 'majorOverlaps', true),
-  );
+  console.log('Total packages (including copies):', packages.length);
+  console.log('  packages with multiple versions:', groupPackages.filter(gp => gp.multiple).length);
+  console.log('         duplicate major versions:', groupPackages.filter(gp => gp.dupMajor).length);
 });
