@@ -4,11 +4,14 @@ const fs = require('fs');
 const readline = require('readline');
 const _groupBy = require('lodash/groupBy');
 const _countBy = require('lodash/countBy');
+const { spawn } = require('child_process');
 
-const rl = readline.createInterface({
+const lockRead = readline.createInterface({
   input: fs.createReadStream('yarn.lock'),
   crlfDelay: Infinity,
 });
+
+let prompt;
 
 const packages = [];
 
@@ -42,9 +45,20 @@ const parseVersion = line => {
   return { version, major: splitVersion[0], minor: `${splitVersion[0]}.${splitVersion[1]}` };
 };
 
-rl.on('line', line => {
+let lineNumber = 1;
+let previousPackageStartLine = 1;
+
+const recordPreviousPackageLines = () => {
+  if (!packages.length) return;
+  const previousPackage = packages[packages.length - 1];
+  previousPackage.lines = [previousPackageStartLine, lineNumber - 1];
+  previousPackageStartLine = lineNumber;
+};
+
+lockRead.on('line', line => {
   // Add a record for lines that are requirement definitions (not comment, not indented)
   if (line !== '' && !line.startsWith(' ') && !line.startsWith('#')) {
+    recordPreviousPackageLines();
     packages.push(parseDependency(line));
   }
   // attach the next line ("  version ...") to the previous dependency line
@@ -56,6 +70,8 @@ rl.on('line', line => {
     package.major = major;
     package.minor = minor;
   }
+
+  lineNumber += 1;
 });
 
 const unknownStrictnesses = /[|<*\-x]/;
@@ -69,17 +85,18 @@ const getStrictness = dependency => {
   return 'Exact?';
 };
 
-rl.on('close', () => {
+lockRead.on('close', () => {
   let groupPackages = _groupBy(packages, 'package');
   groupPackages = Object.values(groupPackages).map(gp => {
     const package = gp[0].package;
-    const versions = gp.map(({ dependency, version, major, minor, strictness }) => {
+    const versions = gp.map(({ dependency, version, major, minor, strictness, lines }) => {
       return {
         dependency: dependency,
         strictness: strictness,
         version,
         major,
         minor,
+        lines,
       };
     });
 
@@ -96,11 +113,23 @@ rl.on('close', () => {
       Object.keys(dupMinorCounts).forEach(k => {
         if (dupMinorCounts[k] > 1) dupMinor.push(k);
       });
-      // console.log(package, dupMajor);
     } else multiple = false;
 
+    let fixable = false;
     const recommendations = dupMajor.map(dm => {
-      return `dedupe version ${dm} yo`;
+      const filteredVersions = versions.filter(v => v.major === dm);
+      const strictnesses = _countBy(filteredVersions.map(v => v.strictness));
+
+      if (strictnesses.Compatible === filteredVersions.length) {
+        fixable = true;
+        return `Version ${dm} can be completely deduped!`;
+      }
+      if (strictnesses.Compatible > 1) {
+        fixable = true;
+        return `Some copies of version ${dm} can be deduped!`;
+      }
+      // todo: report on minor dedupes
+      return `Not sure what to do about version ${dm}, yo`;
     });
 
     return {
@@ -109,17 +138,88 @@ rl.on('close', () => {
       multiple,
       dupMajor: dupMajor.length != 0,
       dupMinor: dupMinor.length != 0,
+      fixable,
       recommendations,
     };
   });
 
-  console.dir(
-    groupPackages.filter(gp => gp.dupMajor),
-    { depth: null },
-  );
+  // console.dir(
+  //   // groupPackages.filter(gp => gp.dupMajor),
+  //   groupPackages.filter(gp => gp.fixable),
+  //   { depth: null },
+  // );
 
   console.log('yarn.lock report --------------------------');
   console.log('Total packages (including copies):', packages.length);
   console.log('  packages with multiple versions:', groupPackages.filter(gp => gp.multiple).length);
   console.log('         duplicate major versions:', groupPackages.filter(gp => gp.dupMajor).length);
+
+  const spawnError = error => {
+    console.log(`spawn error: ${error.message}`);
+  };
+
+  const fixable = groupPackages.filter(gp => gp.fixable);
+  if (fixable.length === 0) {
+    console.log('did not see any problems that can be autofixed');
+  } else {
+    console.log('recommendations:');
+    fixable.forEach(gp => {
+      console.log(gp.package, gp.recommendations);
+    });
+
+    prompt = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    prompt.question('Attempt autofix [Y/n]? ', answer => {
+      if (!answer || answer.match(/^y(es)?/i)) {
+        console.log('=====> Deleting fixable package lines from yarn.lock');
+
+        const deleteRanges = [];
+        fixable.forEach(gp => {
+          gp.versions.forEach(v => {
+            if (v.strictness === 'Compatible') deleteRanges.push(v.lines);
+          });
+        });
+        const sedRanges = deleteRanges.map(([start, end]) => `-e ${start},${end}d`);
+        const sed = spawn('sed', ['-i.old', ...sedRanges, 'yarn.lock'], { stdio: 'inherit' });
+
+        sed.on('error', spawnError);
+
+        sed.on('close', code => {
+          if (code === 0) {
+            console.log('*Success*');
+            console.log('=====> Restore package(s) by calling yarn install');
+            const yarn = spawn('yarn', [], { stdio: 'inherit' });
+
+            yarn.on('error', spawnError);
+
+            yarn.on('close', code => {
+              if (code === 0) {
+                console.log('<===== yarn successful, removing temporary file');
+                spawn('rm', ['yarn.lock.old'], { detatch: true, stdio: 'inherit' });
+              } else {
+                console.log(
+                  `<===== yarn was not successful (code ${code}), restoring old yarn.lock`,
+                );
+                spawn('mv', ['yarn.lock.old', 'yarn.lock'], { detatch: true, stdio: 'inherit' });
+              }
+              prompt.close();
+            });
+          } else {
+            console.log(`<===== sed process exited with code ${code}`);
+            prompt.close();
+          }
+        });
+      } else {
+        console.log('NO');
+        prompt.close();
+      }
+    });
+
+    prompt.on('close', () => {
+      process.exit(0);
+    });
+  }
 });
