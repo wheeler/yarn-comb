@@ -6,15 +6,32 @@ const _groupBy = require('lodash/groupBy');
 const _countBy = require('lodash/countBy');
 const { spawn } = require('child_process');
 
-const lockRead = readline.createInterface({
-  input: fs.createReadStream('yarn.lock'),
-  crlfDelay: Infinity,
-});
-
 let prompt;
 
-const packages = [];
+///////////////////////////
+// child_process helpers //
+///////////////////////////
 
+const spawnError = error => {
+  console.log(`spawn error: ${error.message}`);
+};
+
+///////////////////////
+// yarn.lock helpers //
+///////////////////////
+
+/**
+ * Extract the package name from a yarn.lock dependency line
+ *
+ * @example
+ *
+ *     // returns '@babel/helper-split-export-declaration'
+ *     getPackageName('"@babel/helper-split-export-declaration@^7.10.1", "@babel/helper-split-export-declaration@^7.10.4"')
+ *
+ *
+ * @param {string} - yarn.lock dependency line
+ * @return {string} package name
+ */
 const getPackageName = line => {
   line = line.replace(/^"/, '');
   if (line.startsWith('@')) {
@@ -45,6 +62,22 @@ const parseVersion = line => {
   return { version, major: splitVersion[0], minor: `${splitVersion[0]}.${splitVersion[1]}` };
 };
 
+const unknownStrictnesses = /[|<*\-x]/;
+
+const getStrictness = dependency => {
+  if (dependency.match(/^\d+\.\d+\.\d+/)) return 'Exact';
+  if (dependency.match(/^\d+\.\d+/)) return 'Approximate';
+  if (dependency.match(unknownStrictnesses)) return 'unknown';
+  if (dependency.includes('^')) return 'Compatible';
+  else if (dependency.includes('~')) return 'Approximate';
+  return 'Exact?';
+};
+
+////////////////////
+// Read yarn.lock //
+////////////////////
+
+const packages = [];
 let lineNumber = 1;
 let previousPackageStartLine = 1;
 
@@ -54,6 +87,11 @@ const recordPreviousPackageLines = () => {
   previousPackage.lines = [previousPackageStartLine, lineNumber - 1];
   previousPackageStartLine = lineNumber;
 };
+
+const lockRead = readline.createInterface({
+  input: fs.createReadStream('yarn.lock'),
+  crlfDelay: Infinity,
+});
 
 lockRead.on('line', line => {
   // Add a record for lines that are requirement definitions (not comment, not indented)
@@ -73,17 +111,6 @@ lockRead.on('line', line => {
 
   lineNumber += 1;
 });
-
-const unknownStrictnesses = /[|<*\-x]/;
-
-const getStrictness = dependency => {
-  if (dependency.match(/^\d+\.\d+\.\d+/)) return 'Exact';
-  if (dependency.match(/^\d+\.\d+/)) return 'Approximate';
-  if (dependency.match(unknownStrictnesses)) return 'unknown';
-  if (dependency.includes('^')) return 'Compatible';
-  else if (dependency.includes('~')) return 'Approximate';
-  return 'Exact?';
-};
 
 lockRead.on('close', () => {
   let groupPackages = _groupBy(packages, 'package');
@@ -153,10 +180,6 @@ lockRead.on('close', () => {
   console.log('Total packages (including copies):', packages.length);
   console.log('  packages with multiple versions:', groupPackages.filter(gp => gp.multiple).length);
   console.log('         duplicate major versions:', groupPackages.filter(gp => gp.dupMajor).length);
-
-  const spawnError = error => {
-    console.log(`spawn error: ${error.message}`);
-  };
 
   const fixable = groupPackages.filter(gp => gp.fixable);
   if (fixable.length === 0) {
