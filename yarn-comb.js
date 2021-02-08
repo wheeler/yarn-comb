@@ -25,8 +25,8 @@ const spawnError = error => {
  *
  * @example
  *
- *     // returns '@babel/helper-split-export-declaration'
  *     getPackageName('"@babel/helper-split-export-declaration@^7.10.1", "@babel/helper-split-export-declaration@^7.10.4"')
+ *     // ==> returns '@babel/helper-split-export-declaration'
  *
  *
  * @param {string} - yarn.lock dependency line
@@ -56,7 +56,15 @@ const parseDependency = line => {
 
 const parseVersion = line => {
   const version = line.replace(/(  version "|")/g, '');
-  const splitVersion = version.replace(/^0\./, '0dot').split('.');
+  if (version.startsWith('0.0.')) {
+    return {version, major: version, minor: version}
+  }
+
+  const splitVersion = version.split('.');
+  // const splitVersion = version.replace(/^0\./, '0dot').split('.');
+  if (version.startsWith('0.')) {
+    return {version, major: `${splitVersion[0]}.${splitVersion[1]}`, minor: version}
+  }
   const isZeroDot = splitVersion[0].includes('dot');
   if (isZeroDot) splitVersion[0] = splitVersion[0].replace(/dot/, '.');
   return { version, major: splitVersion[0], minor: `${splitVersion[0]}.${splitVersion[1]}` };
@@ -68,6 +76,10 @@ const getStrictness = dependency => {
   if (dependency.match(/^\d+\.\d+\.\d+/)) return 'Exact';
   if (dependency.match(/^\d+\.\d+/)) return 'Approximate';
   if (dependency.match(unknownStrictnesses)) return 'unknown';
+  if (dependency.match(/^\^0\.0\./)) return 'Exact';
+  if (dependency.match(/^~0\./)) return 'Exact';
+  if (dependency.match(/^\^0\./)) return 'Approximate';
+  if (dependency.includes('>=')) return 'Compatible';
   if (dependency.includes('^')) return 'Compatible';
   else if (dependency.includes('~')) return 'Approximate';
   return 'Exact?';
@@ -112,6 +124,8 @@ lockRead.on('line', line => {
   lineNumber += 1;
 });
 
+// TODO: handle non-re-run dedupes like 10.5.2 + ~10.5.0
+
 lockRead.on('close', () => {
   let groupPackages = _groupBy(packages, 'package');
   groupPackages = Object.values(groupPackages).map(gp => {
@@ -143,20 +157,33 @@ lockRead.on('close', () => {
     } else multiple = false;
 
     let fixable = false;
-    const recommendations = dupMajor.map(dm => {
+    const recommendations = [];
+
+    dupMajor.forEach(dm => {
       const filteredVersions = versions.filter(v => v.major === dm);
       const strictnesses = _countBy(filteredVersions.map(v => v.strictness));
 
+      if (strictnesses.Exact === filteredVersions.length) {
+        return;
+      }
       if (strictnesses.Compatible === filteredVersions.length) {
         fixable = true;
-        return `Version ${dm} can be completely deduped!`;
+        recommendations.push(`Version ${dm} can be completely deduped!`);
+        return;
       }
       if (strictnesses.Compatible > 1) {
         fixable = true;
-        return `Some copies of version ${dm} can be deduped!`;
+        recommendations.push(`Some copies of version ${dm} can be deduped!`);
+        return;
+      }
+      const compatibleVersion = filteredVersions.find(v => v.strictness === 'Compatible')
+      const exactVersion = filteredVersions.filter(v => v.strictness === 'Exact')
+      if (compatibleVersion && exactVersion.some(ev => ev.minor < compatibleVersion.minor)) {
+        // recommendations.push(An exact version of ${dm} is lower than another - cannot dedupe without downgrading`);
+        return;
       }
       // todo: report on minor dedupes
-      return `Not sure what to do about version ${dm}, yo`;
+      recommendations.push(`Not sure what to do about version ${dm}, yo`);
     });
 
     return {
