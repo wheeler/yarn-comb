@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const semver = require('semver');
 const readline = require('readline');
 const _groupBy = require('lodash/groupBy');
 const _countBy = require('lodash/countBy');
@@ -56,18 +57,7 @@ const parseDependency = line => {
 
 const parseVersion = line => {
   const version = line.replace(/(  version "|")/g, '');
-  if (version.startsWith('0.0.')) {
-    return {version, major: version, minor: version}
-  }
-
-  const splitVersion = version.split('.');
-  // const splitVersion = version.replace(/^0\./, '0dot').split('.');
-  if (version.startsWith('0.')) {
-    return {version, major: `${splitVersion[0]}.${splitVersion[1]}`, minor: version}
-  }
-  const isZeroDot = splitVersion[0].includes('dot');
-  if (isZeroDot) splitVersion[0] = splitVersion[0].replace(/dot/, '.');
-  return { version, major: splitVersion[0], minor: `${splitVersion[0]}.${splitVersion[1]}` };
+  return semver.parse(version);
 };
 
 const unknownStrictnesses = /[|<*\-x]/;
@@ -113,12 +103,8 @@ lockRead.on('line', line => {
   }
   // attach the next line ("  version ...") to the previous dependency line
   if (line.startsWith('  version ')) {
-    const package = packages[packages.length - 1];
-
-    const { version, major, minor } = parseVersion(line);
-    package.version = version;
-    package.major = major;
-    package.minor = minor;
+    const installedSemver = parseVersion(line)
+    packages[packages.length - 1] = {...packages[packages.length - 1], ...installedSemver}
   }
 
   lineNumber += 1;
@@ -130,16 +116,7 @@ lockRead.on('close', () => {
   let groupPackages = _groupBy(packages, 'package');
   groupPackages = Object.values(groupPackages).map(gp => {
     const package = gp[0].package;
-    const versions = gp.map(({ dependency, version, major, minor, strictness, lines }) => {
-      return {
-        dependency: dependency,
-        strictness: strictness,
-        version,
-        major,
-        minor,
-        lines,
-      };
-    }).sort((a,b) => (a.major - b.major));
+    const versions = gp.sort((a,b) => (a.major - b.major));
 
     let multiple;
     let dupMajor = [];
@@ -150,7 +127,7 @@ lockRead.on('close', () => {
       Object.keys(dupMajorCounts).forEach(k => {
         if (dupMajorCounts[k] > 1) dupMajor.push(k);
       });
-      const dupMinorCounts = _countBy(versions.map(v => v.minor));
+      const dupMinorCounts = _countBy(versions.map(v => `${v.major}.${v.minor}`));
       Object.keys(dupMinorCounts).forEach(k => {
         if (dupMinorCounts[k] > 1) dupMinor.push(k);
       });
