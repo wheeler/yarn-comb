@@ -139,7 +139,7 @@ lockRead.on('close', () => {
         minor,
         lines,
       };
-    });
+    }).sort((a,b) => (a.major - b.major));
 
     let multiple;
     let dupMajor = [];
