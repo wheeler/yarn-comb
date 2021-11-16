@@ -56,7 +56,7 @@ const parseDependency = line => {
 };
 
 const parseVersion = line => {
-  const version = line.replace(/(  version "|")/g, '');
+  const version = line.replace(/(  version |")/g, '');
   return semver.parse(version);
 };
 
