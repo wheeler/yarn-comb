@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const semver = require('semver');
+const { intersect } = require('semver-range-intersect');
 const readline = require('readline');
 const _groupBy = require('lodash/groupBy');
 const _countBy = require('lodash/countBy');
@@ -75,6 +76,9 @@ const getStrictness = dependency => {
   return 'Exact?';
 };
 
+const rangeFromDependencyString = dependency => intersect(...dependency.split(', '));
+const invalidRangesFromDependencyString = dependency => dependency.split(', ').filter(r => !semver.validRange(r))
+
 ////////////////////
 // Read yarn.lock //
 ////////////////////
@@ -116,7 +120,7 @@ lockRead.on('close', () => {
   let groupPackages = _groupBy(packages, 'package');
   groupPackages = Object.values(groupPackages).map(gp => {
     const package = gp[0].package;
-    const versions = gp.sort((a,b) => (a.major - b.major));
+    const versions = gp.sort((a, b) => semver.compare(a.version, b.version));
 
     let multiple;
     let dupMajor = [];
@@ -174,11 +178,42 @@ lockRead.on('close', () => {
     };
   });
 
-  // console.dir(
-  //   // groupPackages.filter(gp => gp.dupMajor),
-  //   groupPackages.filter(gp => gp.fixable),
-  //   { depth: null },
-  // );
+  const newRecommendations = {exotic: [], resolved: [], overlap: []};
+  groupPackages.forEach(gp => {
+    if (!gp.multiple) return;
+
+    // console.log(gp.versions)
+    gp.versions.forEach(({version, dependency}, index) => {
+      const range = rangeFromDependencyString(dependency);
+      if (!semver.satisfies(version, range)) {
+        const invalidVersions = invalidRangesFromDependencyString(dependency);
+        if (invalidVersions.length) {
+          newRecommendations.exotic.push(`${gp.package} installed version ${version} is exotic!`)
+          return;
+        } else {
+          newRecommendations.resolved.push(`${gp.package} installed version ${version} does not match dependency ${dependency}.`)
+          return;
+        }
+      }
+
+      if (index < gp.versions.length-1) {
+        const overlap = semver.intersects(range, rangeFromDependencyString(gp.versions[index+1].dependency));
+        if (overlap) {
+          newRecommendations.overlap.push(`${gp.package} dependency ${dependency} overlaps dependency ${gp.versions[index+1].dependency}.`)
+        }
+        // console.log('compare', dependency, 'with', gp.versions[index+1].dependency, semver.intersects(range, rangeFromDependencyString(gp.versions[index+1].dependency)))
+      }
+    });
+  })
+
+  // old recs
+  console.dir(
+    groupPackages.filter(gp => gp.recommendations.length > 0),
+    // groupPackages.filter(gp => gp.fixable),
+    { depth: null },
+  );
+  // new recs
+  console.dir(newRecommendations, {depth: null});
 
   console.log('yarn.lock report --------------------------');
   console.log('Total packages (including copies):', packages.length);
