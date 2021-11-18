@@ -13,6 +13,10 @@ I've done a decent amount of manual manipulation of `yarn.lock` files for `yarn`
 - Run `yarn install` to have these dependencies re-installed
 - when yarn installs overlapping dependencies fresh it will install only the latest version that satisfies
 
+### future asipriations
+- make it an npm package that can be installed or npx'd
+- handle more subtle deduplication such as minor downgrades
+- walk up the package chain looking for dependency updates that will result in deduplication
 
 ### Other existing options
 #### [yarn-deduplicate](https://www.npmjs.com/package/yarn-deduplicate)
