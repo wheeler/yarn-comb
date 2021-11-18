@@ -1,0 +1,21 @@
+{
+  "name": "yarn-comb",
+  "version": "0.0.1",
+  "description": "A tool to clean and understand your yarn.lock",
+  "main": "yarn-comb.js",
+  "engines": {
+    "yarn": "^1.22.0"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wheeler/yarn-comb.git"
+  },
+  "keywords": [ "yarn", "dependencies", "packages", "duplication", "deduplication", "dedupe", "management", "npm" ],
+  "author": "Mark Wheeler",
+  "license": "MIT",
+  "bugs": { "url": "https://github.com/wheeler/yarn-comb/issues" },
+  "homepage": "https://github.com/wheeler/yarn-comb#readme"
+}
