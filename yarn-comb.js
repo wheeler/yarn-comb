@@ -2,7 +2,12 @@
 
 const fs = require('fs');
 const semver = require('semver');
-const { intersect } = require('semver-range-intersect');
+let intersect;
+try {
+  intersect = require('semver-range-intersect').intersect;
+} catch {
+  console.log('no access to semver-range-intersect')
+}
 const readline = require('readline');
 const _groupBy = require('lodash/groupBy');
 const _countBy = require('lodash/countBy');
@@ -141,7 +146,7 @@ lockRead.on('close', () => {
     const recommendations = [];
 
     dupMajor.forEach(dm => {
-      const filteredVersions = versions.filter(v => v.major === dm);
+      const filteredVersions = versions.filter(v => v.major === parseInt(dm));
       const strictnesses = _countBy(filteredVersions.map(v => v.strictness));
 
       if (strictnesses.Exact === filteredVersions.length) {
@@ -178,40 +183,78 @@ lockRead.on('close', () => {
     };
   });
 
-  const newRecommendations = {exotic: [], resolved: [], overlap: []};
-  groupPackages.forEach(gp => {
-    if (!gp.multiple) return;
+  // groupPackages.filter(gp => gp.package === 'apollo-server-env').map(gp => {
+  //   const [v0, v1] = gp.versions.map(v => v.dependency);
+  //   console.log({
+  //     // v0,v1,
+  //     // range0: semver.validRange(v0),
+  //     // range0: new semver.Range(v0),
+  //     // validRange1: semver.validRange(v1),
+  //     // mergeRange1: v1.split(', '),
+  //     // spaceRange1: semver.validRange(v1.replaceAll(',',' ')),
+  //     // range1: new semver.Range(semver.validRange(v1.replaceAll(',','|| '))),
+  //     intersect0: rangeFromDependencyString(v0),
+  //     intersect1: rangeFromDependencyString(v1),
+  //     bothIntersect: semver.intersects(intersect(...v0.split(', ')),intersect(...v1.split(', ')))
+  //   })
+  // })
 
-    // console.log(gp.versions)
-    gp.versions.forEach(({version, dependency}, index) => {
-      const range = rangeFromDependencyString(dependency);
-      if (!semver.satisfies(version, range)) {
-        const invalidVersions = invalidRangesFromDependencyString(dependency);
-        if (invalidVersions.length) {
-          newRecommendations.exotic.push(`${gp.package} installed version ${version} is exotic!`)
-          return;
-        } else {
-          newRecommendations.resolved.push(`${gp.package} installed version ${version} does not match dependency ${dependency}.`)
-          return;
-        }
-      }
+  const newRecommendations = {exotic: [], resolved: [], downgrade: [], bumpable: [], unknown: []};
+  if (intersect) {
+    groupPackages.forEach(gp => {
+      if (!gp.multiple) return;
 
-      if (index < gp.versions.length-1) {
-        const overlap = semver.intersects(range, rangeFromDependencyString(gp.versions[index+1].dependency));
-        if (overlap) {
-          newRecommendations.overlap.push(`${gp.package} dependency ${dependency} overlaps dependency ${gp.versions[index+1].dependency}.`)
+      // console.log(gp.versions)
+      gp.versions.forEach(({version, dependency}, index) => {
+        const range = rangeFromDependencyString(dependency);
+        if (!semver.satisfies(version, range)) {
+          const invalidVersions = invalidRangesFromDependencyString(dependency);
+          if (invalidVersions.length) {
+            newRecommendations.exotic.push(`${gp.package} installed version ${version} is exotic!`)
+            return;
+          } else {
+            newRecommendations.resolved.push(`${gp.package} installed version ${version} does not match dependency ${dependency}.`)
+            return;
+          }
         }
-        // console.log('compare', dependency, 'with', gp.versions[index+1].dependency, semver.intersects(range, rangeFromDependencyString(gp.versions[index+1].dependency)))
-      }
+
+        if (index < gp.versions.length - 1) {
+          const {version: nextVersion, dependency: nextDependency} = gp.versions[index + 1];
+          const nextRange = rangeFromDependencyString(nextDependency);
+
+          const overlap = semver.intersects(range, nextRange);
+          if (overlap) {
+            const aFitsB = semver.satisfies(version, nextRange)
+            const bFitsA = semver.satisfies(nextVersion, range)
+
+            if (bFitsA) {
+              gp.recommendations.push(`semver overlap recommendation: ${gp.package} ${dependency} and ${nextDependency} look combinable`)
+              gp.fixable = true;
+              // tmp hack - flag these versions "compatible" so the line deleter deletes them
+              gp.versions[index].strictness = 'Compatible'
+              gp.versions[index+1].strictness = 'Compatible'
+            } else if(aFitsB) {
+              newRecommendations.downgrade.push(`${gp.package} dependency ${dependency} (${version}) and dependency ${nextDependency} (${nextVersion}) might be combined with downgrade.`)
+            } else {
+              newRecommendations.unknown.push(`${gp.package} dependency ${dependency} (${version}) and dependency ${nextDependency} (${nextVersion}) unknown.`)
+              // newRecommendations.unknown.push({pkg:gp.package, version,dependency,nextVersion,nextDependency,aFitsB,bFitsA})
+            }
+            // else {
+            //   newRecommendations.overlap.push(`${gp.package} dependency ${dependency} overlaps dependency ${nextDependency}.`)
+            // }
+          }
+          // console.log('compare', dependency, 'with', gp.versions[index+1].dependency, semver.intersects(range, rangeFromDependencyString(gp.versions[index+1].dependency)))
+        }
+      });
     });
-  })
+  }
 
   // old recs
-  console.dir(
-    groupPackages.filter(gp => gp.recommendations.length > 0),
-    // groupPackages.filter(gp => gp.fixable),
-    { depth: null },
-  );
+  // console.dir(
+  //   groupPackages.filter(gp => gp.recommendations.length > 0),
+  //   // groupPackages.filter(gp => gp.fixable),
+  //   { depth: null },
+  // );
   // new recs
   console.dir(newRecommendations, {depth: null});
 
@@ -253,7 +296,7 @@ lockRead.on('close', () => {
           if (code === 0) {
             console.log('*Success*');
             console.log('=====> Restore package(s) by calling yarn install');
-            const yarn = spawn('yarn', [], { stdio: 'inherit' });
+            const yarn = spawn('yarn', ['-s'], { stdio: 'inherit' });
 
             yarn.on('error', spawnError);
 
