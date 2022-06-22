@@ -1,0 +1,12 @@
+{
+  "name": "yarn-comb-test-simple-no-dups",
+  "description": "this package only has one dependency and has no dupes",
+  "version": "0.0.1",
+  "private": true,
+  "engines": {
+    "yarn": "^1.22.0"
+  },
+  "dependencies": {
+    "npm": "^8.12.2"
+  }
+}

@@ -8,7 +8,7 @@
   },
   "bin": "./yarn-comb.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "(cd test && ./run-tests.sh)"
   },
   "repository": {
     "type": "git",

@@ -1,0 +1,13 @@
+{
+  "name": "simple-dup-major",
+  "description": "At the start of the test this package has two versions of npm 8 both with ^ specifiers",
+  "version": "0.0.1",
+  "private": true,
+  "engines": {
+    "yarn": "^1.22.0"
+  },
+  "dependencies": {
+    "npm": "^8.12.2",
+    "uses-npm-811": "file:../../test-dependencies/uses-npm-811"
+  }
+}
