@@ -6,6 +6,7 @@
   "engines": {
     "yarn": "^1.22.0"
   },
+  "bin": "./yarn-comb.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -13,9 +14,24 @@
     "type": "git",
     "url": "git+https://github.com/wheeler/yarn-comb.git"
   },
-  "keywords": [ "yarn", "dependencies", "packages", "duplication", "deduplication", "dedupe", "management", "npm" ],
+  "keywords": [
+    "yarn",
+    "dependencies",
+    "packages",
+    "duplication",
+    "deduplication",
+    "dedupe",
+    "management",
+    "npm"
+  ],
   "author": "Mark Wheeler",
   "license": "MIT",
-  "bugs": { "url": "https://github.com/wheeler/yarn-comb/issues" },
-  "homepage": "https://github.com/wheeler/yarn-comb#readme"
+  "bugs": {
+    "url": "https://github.com/wheeler/yarn-comb/issues"
+  },
+  "homepage": "https://github.com/wheeler/yarn-comb#readme",
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "semver-range-intersect": "^0.3.1"
+  }
 }
