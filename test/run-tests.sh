@@ -1,12 +1,15 @@
 #!/bin/bash
 
+CYAN='\033[1;36m'
+NC='\033[0m' # No Color
+
 failed=0
 
 for d in test-projects/*/ ; do
-  echo ==== TEST ${d%/}
-  cd $d
+  echo -e "\n${CYAN}TEST${NC}   ${d%/}"
+  cd $d || exit
   npx yarn-comb --fix
-  cd ../..
+  cd ../.. || exit
   ./test-lockfile-snapshot.sh $d || failed=1
 done
 

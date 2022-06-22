@@ -5,14 +5,17 @@ testpath=${1%/} # remove trailing slash if present
 cmp --quiet $testpath/yarn.lock $testpath/yarn.lock.snap
 cmpcode=$?
 
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+NC='\033[0m' # No Color
 
 if [ $cmpcode == 0 ]
 then
-  echo "PASS  \`$testpath/yarn.lock\` file matched \`$testpath/yarn.lock.snap\`."
+  echo -e "\n${GREEN}PASS${NC}   \`$testpath/yarn.lock\` file matched \`$testpath/yarn.lock.snap\`.\n"
   exit 0
 elif [ $cmpcode == 1 ] # cmp command will exit with code 1 if there is any difference
 then
-  echo "FAIL  \`$testpath/yarn.lock\` file had differences from \`$testpath/yarn.lock.snap\`."
+  echo -e "\n${RED}FAIL${NC}   \`$testpath/yarn.lock\` file had differences from \`$testpath/yarn.lock.snap\`.\n"
   # comm command will output details
   comm -3 $testpath/yarn.lock $testpath/yarn.lock.snap
   exit 1
