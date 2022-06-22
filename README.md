@@ -22,7 +22,8 @@ I've done a decent amount of manual manipulation of `yarn.lock` files for `yarn`
 ### future aspirations
 - ~package is executable locally through `yarn link` + `npx yarn-comb`~
 - publish as a npm package (so it can be generally npx'd)
-- write some tests :]
+- ~write >0 tests :]~
+- write more tests for decent coverage
 - rewrite my manual semver parsing to use published semver parsing packages
 - handle more subtle deduplication such as minor downgrades
 - walk up the package chain looking for dependency updates that will result in deduplication

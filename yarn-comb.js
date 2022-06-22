@@ -13,6 +13,9 @@ const _groupBy = require('lodash/groupBy');
 const _countBy = require('lodash/countBy');
 const { spawn } = require('child_process');
 
+const [,, ...args] = process.argv
+const autofix = args.includes('--fix')
+
 let prompt;
 
 ///////////////////////////
@@ -265,66 +268,78 @@ lockRead.on('close', () => {
 
   const fixable = groupPackages.filter(gp => gp.fixable);
   if (fixable.length === 0) {
-    console.log('did not see any problems that can be autofixed');
+    console.log('did not see any problems that can be fixed');
   } else {
     console.log('recommendations:');
     fixable.forEach(gp => {
       console.log(gp.package, gp.recommendations);
     });
 
-    prompt = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
+    /**
+     * fix() function defined here to use closure vars for simplicity. readline.createInterface uses callbacks and this is easy
+     */
+    const fix = () => {
+      console.log('=====> Deleting fixable package lines from yarn.lock');
 
-    prompt.question('Attempt autofix [Y/n]? ', answer => {
-      if (!answer || answer.match(/^y(es)?/i)) {
-        console.log('=====> Deleting fixable package lines from yarn.lock');
+      const deleteRanges = [];
+      fixable.forEach(gp => {
+        gp.versions.forEach(v => {
+          if (v.strictness === 'Compatible') deleteRanges.push(v.lines);
+        });
+      });
+      const sedRanges = deleteRanges.map(([start, end]) => `-e ${start},${end}d`);
+      const sed = spawn('sed', ['-i.old', ...sedRanges, 'yarn.lock'], {stdio: 'inherit'});
 
-        const deleteRanges = [];
-        fixable.forEach(gp => {
-          gp.versions.forEach(v => {
-            if (v.strictness === 'Compatible') deleteRanges.push(v.lines);
+      sed.on('error', spawnError);
+
+      sed.on('close', code => {
+        if (code === 0) {
+          console.log('*Success*');
+          console.log('=====> Restore package(s) by calling yarn install');
+          const yarn = spawn('yarn', ['-s'], {stdio: 'inherit'});
+
+          yarn.on('error', spawnError);
+
+          yarn.on('close', code => {
+            if (code === 0) {
+              console.log('<===== yarn successful, removing temporary file');
+              spawn('rm', ['yarn.lock.old'], {detatch: true, stdio: 'inherit'});
+            } else {
+              console.log(
+                `<===== yarn was not successful (code ${code}), restoring old yarn.lock`,
+              );
+              spawn('mv', ['yarn.lock.old', 'yarn.lock'], {detatch: true, stdio: 'inherit'});
+            }
+            prompt?.close();
           });
-        });
-        const sedRanges = deleteRanges.map(([start, end]) => `-e ${start},${end}d`);
-        const sed = spawn('sed', ['-i.old', ...sedRanges, 'yarn.lock'], { stdio: 'inherit' });
+        } else {
+          console.log(`<===== sed process exited with code ${code}`);
+          prompt?.close();
+        }
+      })
+    }
 
-        sed.on('error', spawnError);
+    if(autofix) {
+      console.log('automatically attempting fix')
+      fix()
+    } else {
+      prompt = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
 
-        sed.on('close', code => {
-          if (code === 0) {
-            console.log('*Success*');
-            console.log('=====> Restore package(s) by calling yarn install');
-            const yarn = spawn('yarn', ['-s'], { stdio: 'inherit' });
+      prompt.question('Attempt fix [Y/n]? ', answer => {
+        if (!answer || answer.match(/^y(es)?/i)) {
+          fix()
+        } else {
+          console.log('OK, NOT attempting fix');
+          prompt.close();
+        }
+      });
 
-            yarn.on('error', spawnError);
-
-            yarn.on('close', code => {
-              if (code === 0) {
-                console.log('<===== yarn successful, removing temporary file');
-                spawn('rm', ['yarn.lock.old'], { detatch: true, stdio: 'inherit' });
-              } else {
-                console.log(
-                  `<===== yarn was not successful (code ${code}), restoring old yarn.lock`,
-                );
-                spawn('mv', ['yarn.lock.old', 'yarn.lock'], { detatch: true, stdio: 'inherit' });
-              }
-              prompt.close();
-            });
-          } else {
-            console.log(`<===== sed process exited with code ${code}`);
-            prompt.close();
-          }
-        });
-      } else {
-        console.log('NO');
-        prompt.close();
-      }
-    });
-
-    prompt.on('close', () => {
-      process.exit(0);
-    });
+      prompt.on('close', () => {
+        process.exit(0);
+      });
+    }
   }
 });
