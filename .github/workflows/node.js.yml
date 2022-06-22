@@ -28,5 +28,6 @@ jobs:
         cache: 'yarn'
     - name: Install dependencies 📦
       run: yarn install --frozen-lockfile
+    - run: npm link
     - name: Test
       run: yarn test
