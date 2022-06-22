@@ -1,6 +1,9 @@
 # yarn-comb
 A tool to clean and understand your `yarn.lock` file [WIP]
 
+![CI](https://github.com/wheeler/yarn-comb/actions/workflows/node.js.yml/badge.svg)
+
+
 ### quick-start
 1. clone repo
 2. run `yarn install` in repo folder to install dependencies
